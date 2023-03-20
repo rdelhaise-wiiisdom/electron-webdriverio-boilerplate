@@ -98,7 +98,7 @@ class AppUpdater {
 let mainWindow: BrowserWindow | null = null;
 
 ipcMain.on('ipc-example', async (event, arg) => {
-  const driver = await startDriverBin('/Users/remydelhaise/Developpement/WOFT/poc-webdriverio/src/resources/chromedriver', 4445);
+  const driver = await startDriverBin(path.resolve(__dirname, '../', 'resources', 'chromedriver'), 4445);
   try {
   const browser = await webdriverio.remote({
     port: 4445,
