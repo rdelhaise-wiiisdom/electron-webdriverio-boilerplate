@@ -9,11 +9,83 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import { app, BrowserWindow, shell, ipcMain } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
+import { spawn } from 'child_process';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
+const webdriverio = require('webdriverio');
+import { Promise as Es6Promise } from 'es6-promise';
+import waitPort from 'wait-port';
+
+function startDriverBin(bin: string, port: number) {
+  return new Es6Promise((resolve, reject) => {
+    try {
+      const program = spawn(bin, [`--port=${port}`]);
+      let isFirst = true;
+      let stderr = '';
+      program.stdout.on('data', data => {
+        stderr += data.toString('utf8');
+        log.debug('WEBDRIVER STDERR', stderr);
+        // This detects driver instance get ready.
+        if (!isFirst) {
+          return;
+        }
+        isFirst = false;
+
+        waitPort({
+          port,
+          host: 'localhost',
+          timeout: 3000, // 3s
+        })
+          .then(() => {
+            return resolve(program);
+          })
+          .catch(err => {
+            console.log(err);
+            reject(new Error(`Failed to start ChromeDriver: ${err}`));
+          });
+      });
+      program.stderr.on('data', data => {
+        stderr += data.toString('utf8');
+        console.log('WEBDRIVER STDERR', stderr);
+      });
+      program.on('error', err => {
+        console.log('WEBDRIVER ERROR', err);
+        if (!isFirst) {
+          return;
+        }
+        isFirst = false;
+        reject(err);
+      });
+      program.on('close', () => {
+        console.log('BROWSER WINDOW CLOSED');
+      });
+      program.on('exit', code => {
+        if (!isFirst) {
+          return;
+        }
+        isFirst = false;
+        if (code === 0) {
+          // webdriver some cases doesn't use exit codes correctly :(
+          if (stderr.indexOf('Error:') === 0) {
+            console.log(stderr);
+            reject(new Error(stderr));
+          } else {
+            resolve(program);
+          }
+        } else {
+          console.log(`Exit code: ${code}`);
+          reject(new Error(`Exit code: ${code}`));
+        }
+      });
+    } catch (err) {
+      console.log(err);
+      reject(err);
+    }
+  });
+}
 
 class AppUpdater {
   constructor() {
@@ -26,9 +98,43 @@ class AppUpdater {
 let mainWindow: BrowserWindow | null = null;
 
 ipcMain.on('ipc-example', async (event, arg) => {
-  const msgTemplate = (pingPong: string) => `IPC test: ${pingPong}`;
-  console.log(msgTemplate(arg));
-  event.reply('ipc-example', msgTemplate('pong'));
+  const driver = await startDriverBin('/Users/remydelhaise/Developpement/WOFT/poc-webdriverio/src/resources/chromedriver', 4445);
+  try {
+  const browser = await webdriverio.remote({
+    port: 4445,
+    path: '/',
+    connectionRetryCount: 0,
+    capabilities: {
+      browserName: 'chrome',
+      'goog:chromeOptions': {
+        args: [],
+        // Don't install automation extension, installing extensions to chrome may require admin privileges
+        useAutomationExtension: false,
+        // Disable same site cookie enformcement because Tableau Server on Windows doesn't like it
+        localState: {
+          'browser.enabled_labs_experiments': [
+            'same-site-by-default-cookies@2',
+            'cookies-without-same-site-must-be-secure@2',
+          ],
+        },
+        prefs: {
+          directory_upgrade: true,
+          // prompt_for_download: false,
+          download: {
+            default_directory: "",
+          },
+        },
+      },
+    },
+    logLevel: 'silent',
+  });
+  const userAgent = await browser.executeAsync((done: (userAgent: any) => any) => {
+    done(navigator.userAgent);
+  });
+  } catch(e) {
+    console.log("ERROR IN WEBDRIVER", e)
+  }
+  event.reply('ipc-example', 'pong');
 });
 
 if (process.env.NODE_ENV === 'production') {

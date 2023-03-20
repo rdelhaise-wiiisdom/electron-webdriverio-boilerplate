@@ -47,6 +47,9 @@ const configuration: webpack.Configuration = {
     modules: [webpackPaths.srcPath, 'node_modules'],
     // There is no need to add aliases here, the paths in tsconfig get mirrored
     plugins: [new TsconfigPathsPlugins()],
+    alias: {
+      webdriverio: "webdriverio"
+    }
   },
 
   plugins: [
@@ -54,6 +57,11 @@ const configuration: webpack.Configuration = {
       NODE_ENV: 'production',
     }),
   ],
+
+  experiments: {
+    topLevelAwait: true,
+  },
 };
+
 
 export default configuration;
